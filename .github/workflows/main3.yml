@@ -1,0 +1,114 @@
+name: macOS-Full-Remote
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-remote:
+    runs-on: macos-latest
+    timeout-minutes: 3600
+
+    steps:
+
+      # ================================
+      # 1️⃣ Create Dedicated Remote User
+      # ================================
+      - name: Create Secure Remote User
+        run: |
+          PASSWORD=$(LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+' </dev/urandom | head -c 20)
+
+          sudo sysadminctl -addUser RemoteUser \
+            -password "$PASSWORD" \
+            -admin
+
+          echo "REMOTE_USER=RemoteUser" >> $GITHUB_ENV
+          echo "REMOTE_PASS=$PASSWORD" >> $GITHUB_ENV
+
+      # =====================================
+      # 2️⃣ Enable Auto Login for That User
+      # =====================================
+      - name: Enable Auto Login
+        run: |
+          sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser RemoteUser
+
+      # =====================================
+      # 3️⃣ Disable Sleep & Power Saving
+      # =====================================
+      - name: Disable Sleep
+        run: |
+          sudo systemsetup -setcomputersleep Never
+          sudo systemsetup -setdisplaysleep Never
+          sudo systemsetup -setharddisksleep Never
+          sudo pmset -a sleep 0
+          sudo pmset -a disablesleep 1
+
+      # =====================================
+      # 4️⃣ Enable Full Apple Remote Desktop
+      # =====================================
+      - name: Enable Full Remote Management
+        run: |
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -configure -allowAccessFor -specifiedUsers \
+            -configure -users RemoteUser \
+            -configure -privs -all \
+            -restart -agent
+
+          sudo launchctl load -w /System/Library/LaunchDaemons/com.apple.screensharing.plist
+
+      # ================================
+      # 5️⃣ Install Tailscale
+      # ================================
+      - name: Install Tailscale
+        run: |
+          brew install tailscale
+          sudo tailscaled install-system-daemon
+
+      # ================================
+      # 6️⃣ Connect to Tailscale
+      # ================================
+      - name: Connect to Tailscale
+        run: |
+          sudo tailscale up \
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} \
+            --hostname=gh-macos-${{ github.run_id }}
+
+          for i in {1..15}; do
+            TS_IP=$(tailscale ip -4 | head -n 1)
+            [ -n "$TS_IP" ] && break
+            sleep 5
+          done
+
+          if [ -z "$TS_IP" ]; then
+            echo "Tailscale IP not assigned"
+            exit 1
+          fi
+
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
+
+      # ================================
+      # 7️⃣ Verify VNC Port
+      # ================================
+      - name: Verify VNC
+        run: |
+          nc -zv $TAILSCALE_IP 5900 || exit 1
+          echo "VNC Port 5900 reachable"
+
+      # ================================
+      # 8️⃣ Keep Runner Alive
+      # ================================
+      - name: Maintain Session
+        run: |
+          echo ""
+          echo "========= 🍎 macOS FULL REMOTE ========="
+          echo "Address  : $TAILSCALE_IP:5900"
+          echo "Username : $REMOTE_USER"
+          echo "Password : $REMOTE_PASS"
+          echo "Protocol : VNC / Apple Screen Sharing"
+          echo "========================================="
+          echo ""
+
+          while true; do
+            echo "[$(date)] macOS Remote Active"
+            sleep 300
+          done
