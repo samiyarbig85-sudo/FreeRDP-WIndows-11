@@ -1,0 +1,77 @@
+name: macOS-SSH-Tailscale
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-ssh:
+    runs-on: macos-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Configure Core SSH and User
+        run: |
+          # Enable SSH (Remote Login)
+          sudo systemsetup -setremotelogin on
+
+          # Create a dedicated SSH user
+          sudo dscl . -create /Users/ghssh
+          sudo dscl . -create /Users/ghssh UserShell /bin/bash
+          sudo dscl . -create /Users/ghssh RealName "GH SSH User"
+          sudo dscl . -create /Users/ghssh UniqueID "1001"
+          sudo dscl . -create /Users/ghssh PrimaryGroupID 20
+          sudo dscl . -create /Users/ghssh NFSHomeDirectory /Users/ghssh
+          sudo dscl . -passwd /Users/ghssh $(openssl rand -base64 16)
+          sudo createhomedir -c -u ghssh
+
+          # Add user to admin group
+          sudo dseditgroup -o edit -a ghssh -t user admin
+
+          echo "SSH user created: ghssh"
+
+      - name: Install Tailscale
+        run: |
+          TS_VERSION="1.82.0"
+          TS_PKG="https://pkgs.tailscale.com/stable/tailscale-${TS_VERSION}-amd64.pkg"
+          TMP_PKG="$HOME/tailscale.pkg"
+
+          curl -L $TS_PKG -o $TMP_PKG
+          sudo installer -pkg $TMP_PKG -target /
+          rm -f $TMP_PKG
+
+      - name: Establish Tailscale Connection
+        run: |
+          # Bring up Tailscale using auth key from GitHub secrets
+          sudo tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=gh-runner-${GITHUB_RUN_ID}
+
+          # Wait for Tailscale to assign an IP
+          TS_IP=""
+          for i in {1..10}; do
+            TS_IP=$(tailscale ip -4)
+            if [ -n "$TS_IP" ]; then break; fi
+            sleep 5
+          done
+
+          if [ -z "$TS_IP" ]; then
+            echo "Tailscale IP not assigned, exiting."
+            exit 1
+          fi
+
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
+          echo "Tailscale IP: $TS_IP"
+
+      - name: Verify SSH Accessibility (Optional)
+        run: |
+          echo "Trying to verify SSH access to Tailscale IP: $TAILSCALE_IP"
+          nc -zv $TAILSCALE_IP 22 -w 5 || echo "Port 22 not open yet"
+
+      - name: Maintain Connection
+        run: |
+          echo "SSH is ready on Tailscale IP: $TAILSCALE_IP"
+          echo "Username: ghssh"
+          echo "Password: (random, see earlier step in logs if needed)"
+          # Keep runner alive
+          while true; do
+            echo "[$(date)] SSH + Tailscale active. Ctrl+C to stop."
+            sleep 300
+          done
