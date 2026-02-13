@@ -1,4 +1,4 @@
-name: macOS-Remote-Desktop-Final-Fix
+name: macOS-Ultimate-Fix
 
 on:
   workflow_dispatch:
@@ -9,33 +9,37 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Force Enable VNC & Fix Authentication
+      - name: Force Auto-Login & Disable Passwords
         run: |
-          # متوقف کردن سرویس برای اعمال تنظیمات جدید
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -deactivate
+          # ایجاد یوزر
+          sudo dscl . -create /Users/rdpuser
+          sudo dscl . -create /Users/rdpuser UserShell /bin/bash
+          sudo dscl . -create /Users/rdpuser UniqueID 701
+          sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
+          sudo dscl . -passwd /Users/rdpuser "123456"
+          sudo dscl . -append /Groups/admin GroupMembership rdpuser
           
-          # تنظیم پسورد VNC به روش مستقیم (فایل سیستم)
-          # رمز عبور در اینجا: 123456 (برای سادگی در تایپ موبایل)
-          sudo /usr/libexec/PlistBuddy -c "Delete :VNCPassword" /Library/Preferences/com.apple.VNCSettings.txt || true
-          echo "123456" | perl -we 'BEGIN { @k = unpack "C*", pack "H*", "1734516E8BA8C5E2FF1C39567390ADCA"}; $_=<>; chomp; s/\s+$//; @p = unpack "C*", $_; @e = map { shift(@k) ^ $_ } @p; print pack "C*", @e' | sudo tee /Library/Preferences/com.apple.VNCSettings.txt > /dev/null
+          # فعال کردن لاگین خودکار (این حرکت صفحه سیاه را حذف می‌کند)
+          sudo python3 -c '
+          import os
+          print("Setting up auto-login...")
+          os.system("sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string rdpuser")
+          '
           
-          # استارت مجدد با دسترسی کامل
+          # غیرفعال کردن اسکرین سیور و قفل صفحه
+          sudo defaults write com.apple.screensaver idleTime 0
+          sudo defaults write com.apple.loginwindow DisableScreenLock -bool true
+
+      - name: Start Screen Sharing (No Auth Mode)
+        run: |
+          # اجازه دسترسی کامل بدون محدودیت‌های امنیتی سخت‌گیرانه
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
-            -clientopts -setvnclegacy -vnclegacy yes \
+            -clientopts -setvncpw -vncpw "123456" \
             -restart -agent -privs -all
-
-      - name: Create User & Wake GUI
-        run: |
-          # ساخت یوزر rdpuser (اگر از قبل ساخته شده باشد ارور نمی‌دهد)
-          sudo dscl . -create /Users/rdpuser || true
-          sudo dscl . -create /Users/rdpuser UserShell /bin/bash || true
-          sudo dscl . -passwd /Users/rdpuser "MacAccess@2026" || true
-          sudo dscl . -append /Groups/admin GroupMembership rdpuser || true
           
-          # باز کردن یک اپلیکیشن برای بیدار کردن محیط گرافیکی
-          open -a Finder
-          open -a Calculator
+          # بیدار کردن گرافیک
+          Caffeinate -u -t 3600 &
 
       - name: Install & Start Tailscale
         env:
@@ -47,15 +51,12 @@ jobs:
           sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac
           echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
 
-      - name: Display Connection Info
+      - name: Connection Info
         run: |
           echo "=========================================="
           echo "📍 IP: ${{ env.TS_IP }}"
-          echo "👤 OS User: rdpuser"
-          echo "🔑 OS Pass: MacAccess@2026"
-          echo "🔒 VNC Pass: 123456"
+          echo "🔒 VNC Password: 123456"
+          echo "👤 User Password: 123456"
           echo "=========================================="
-          
-          # Keep Alive
           while true; do sleep 300; done
           
