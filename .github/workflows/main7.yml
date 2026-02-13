@@ -6,7 +6,7 @@ on:
 jobs:
   macos-web-vnc:
     # استفاده از macos-13 معمولاً سریع‌تر از latest رانر پیدا می‌کند
-    runs-on: macos-13
+    runs-on: macos-14
     timeout-minutes: 3600
 
     steps:
