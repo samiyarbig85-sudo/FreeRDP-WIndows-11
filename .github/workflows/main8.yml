@@ -1,0 +1,62 @@
+name: macOS-Ultimate-Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-vnc:
+    runs-on: macos-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Force Auto-Login & Disable Passwords
+        run: |
+          # ایجاد یوزر
+          sudo dscl . -create /Users/rdpuser
+          sudo dscl . -create /Users/rdpuser UserShell /bin/bash
+          sudo dscl . -create /Users/rdpuser UniqueID 701
+          sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
+          sudo dscl . -passwd /Users/rdpuser "123456"
+          sudo dscl . -append /Groups/admin GroupMembership rdpuser
+          
+          # فعال کردن لاگین خودکار (این حرکت صفحه سیاه را حذف می‌کند)
+          sudo python3 -c '
+          import os
+          print("Setting up auto-login...")
+          os.system("sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string rdpuser")
+          '
+          
+          # غیرفعال کردن اسکرین سیور و قفل صفحه
+          sudo defaults write com.apple.screensaver idleTime 0
+          sudo defaults write com.apple.loginwindow DisableScreenLock -bool true
+
+      - name: Start Screen Sharing (No Auth Mode)
+        run: |
+          # اجازه دسترسی کامل بدون محدودیت‌های امنیتی سخت‌گیرانه
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -clientopts -setvncpw -vncpw "123456" \
+            -restart -agent -privs -all
+          
+          # بیدار کردن گرافیک
+          Caffeinate -u -t 3600 &
+
+      - name: Install & Start Tailscale
+        env:
+          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          brew install tailscale
+          sudo tailscaled > /dev/null 2>&1 &
+          sleep 10
+          sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac
+          echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
+
+      - name: Connection Info
+        run: |
+          echo "=========================================="
+          echo "📍 IP: ${{ env.TS_IP }}"
+          echo "🔒 VNC Password: 123456"
+          echo "👤 User Password: 123456"
+          echo "=========================================="
+          while true; do sleep 300; done
+          
