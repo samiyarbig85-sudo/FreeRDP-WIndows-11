@@ -1,53 +1,49 @@
-name: macOS-14-Web-GUI
+name: macOS-14-Web-GUI-Fixed
 
 on:
   workflow_dispatch:
 
 jobs:
   macos-gui:
-    # استفاده از نسخه 14 مطابق درخواست شما
     runs-on: macos-14
     timeout-minutes: 3600
 
     steps:
-      - name: Install Dependencies
+      - name: Install and Setup VNC Server
         run: |
-          # نصب ابزارها
+          # ۱. نصب ابزارها
           brew install cloudflared tiger-vnc
-          # دانلود noVNC
-          git clone https://github.com/novnc/noVNC.git /tmp/novnc
-
-      - name: Setup VNC Server
-        run: |
-          # اضافه کردن مسیر Brew به PATH برای شناسایی دستور vncpasswd
+          
+          # ۲. تعریف مسیر Homebrew برای شناسایی vncpasswd و vncserver
           export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
           
-          # ایجاد دایرکتوری تنظیمات
+          # ۳. تنظیم پسورد VNC
           mkdir -p ~/.vnc
-          
-          # تنظیم پسورد VNC (123456)
           echo "123456" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # اجرای سرور VNC روی پورت 5901
+          # ۴. اجرای سرور VNC
           vncserver :1 -geometry 1280x720 -depth 24 -localhost no
+          
+          # ۵. دانلود و آماده‌سازی noVNC
+          git clone https://github.com/novnc/noVNC.git /tmp/novnc
 
-      - name: Launch noVNC Proxy
+      - name: Launch noVNC and Cloudflare
         run: |
+          # تعریف مجدد مسیر برای احتیاط
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          
           # تبدیل VNC به وب (پورت 6080)
           /tmp/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
-
-      - name: Start Cloudflare Tunnel
-        run: |
+          
           # ایجاد تونل کلودفلر
           cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
 
-      - name: Get Web Link
+      - name: Get Access Link
         run: |
           sleep 20
           echo "=========================================="
           echo "🌐 آدرس زیر را در مرورگر کروم گوشی باز کنید:"
-          # پیدا کردن لینک کلودفلر از فایل لوگ
           grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log
           echo "------------------------------------------"
           echo "🔑 Password: 123456"
