@@ -11,44 +11,47 @@ jobs:
     steps:
       - name: Enable Remote Management (VNC)
         run: |
-          # فعال‌سازی سرویس Remote Management
+          # فعال‌سازی Screen Sharing و تنظیم پسورد VNC
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvncpw -vncpw "SecretVNC123" \
             -restart -agent -privs -all
-          
-          # اجازه دسترسی به همه کاربران
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -configure -allowAccessFor -allUsers -privs -all
 
       - name: Configure User Credentials
         run: |
-          # پیدا کردن نام یوزر فعلی
           CURRENT_USER=$(whoami)
           NEW_PASS="MacAccess@2024"
           
-          echo "Target User: $CURRENT_USER"
-          
-          # استفاده از sysadminctl به جای dscl برای پایداری بیشتر در مک‌های جدید
-          sudo sysadminctl -adminUser $CURRENT_USER -adminPassword "" -resetPasswordFor $CURRENT_USER -newPassword "$NEW_PASS" || \
-          (echo "Primary method failed, trying fallback..." && sudo dscl . -passwd /Users/$CURRENT_USER "$NEW_PASS")
+          # تلاش برای تغییر پسورد با استفاده از dscl (روش مستقیم در رانرهای گیت‌هاب)
+          sudo dscl . -passwd /Users/$CURRENT_USER "$NEW_PASS" || echo "Warning: Password change might have failed"
           
           echo "USER_NAME=$CURRENT_USER" >> $GITHUB_ENV
           echo "USER_PASS=$NEW_PASS" >> $GITHUB_ENV
 
       - name: Install Tailscale
         run: |
+          # نصب Tailscale
           curl -fsSL https://tailscale.com/install.sh | sh
+          
+          # اضافه کردن مسیر Tailscale به PATH برای این سشن
+          echo "/Applications/Tailscale.app/Contents/MacOS" >> $GITHUB_PATH
 
       - name: Start Tailscale
         env:
           TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
+          # پیدا کردن مسیر دقیق فایل اجرایی
+          TS_PATH="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+          
+          # اجرای سرویس در پس‌زمینه (استفاده از sudo برای دسترسی به دیوایس‌های شبکه)
           sudo tailscaled > /dev/null 2>&1 &
           sleep 10
-          sudo tailscale up --authkey=$TS_KEY --hostname=gh-macos-runner
           
-          TS_IP=$(tailscale ip -4)
+          # اتصال با استفاده از مسیر کامل
+          sudo $TS_PATH up --authkey=$TS_KEY --hostname=gh-macos-runner
+          
+          # دریافت IP
+          TS_IP=$($TS_PATH ip -4)
           echo "TS_IP=$TS_IP" >> $GITHUB_ENV
 
       - name: Connection Info & Keep Alive
@@ -60,8 +63,11 @@ jobs:
           echo "🔒 VNC Password: SecretVNC123"
           echo "=========================================="
           
+          # نمایش وضعیت برای اطمینان
+          tailscale status || echo "Tailscale status not available via simple command"
+          
           while true; do
-            echo "Keep-alive: $(date)"
+            echo "Keep-alive: $(date) - IP: ${{ env.TS_IP }}"
             sleep 300
           done
           
