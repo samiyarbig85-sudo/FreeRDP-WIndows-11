@@ -1,4 +1,4 @@
-name: macOS-Remote-Desktop
+name: macOS-Remote-Desktop-Final
 
 on:
   workflow_dispatch:
@@ -11,69 +11,94 @@ jobs:
     steps:
       - name: Enable Remote Management (VNC)
         run: |
+          # فعال‌سازی Screen Sharing و تنظیم پسورد VNC
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvncpw -vncpw "SecretVNC123" \
             -restart -agent -privs -all
+          
+          # اجازه دسترسی به همه کاربران برای جلوگیری از بلاک شدن اتصال
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -allowAccessFor -allUsers -privs -all
 
-      - name: Create New Admin User
+      - name: Create Isolated Admin User
         run: |
-          # رفتن به دایرکتوری روت برای جلوگیری از خطای Permission Denied در دایرکتوری فعلی
+          # رفتن به دایرکتوری روت برای جلوگیری از خطای Permission Denied
           cd /
           
-          # ایجاد کاربر جدید
-          sudo dscl . -create /Users/rdpuser
-          sudo dscl . -create /Users/rdpuser UserShell /bin/bash
-          sudo dscl . -create /Users/rdpuser RealName "Remote Admin"
-          sudo dscl . -create /Users/rdpuser UniqueID 701
-          sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
-          sudo dscl . -create /Users/rdpuser NFSHomeDirectory /Users/rdpuser
-          sudo dscl . -passwd /Users/rdpuser "MacAccess@2026"
+          # مشخصات یوزر جدید
+          USER_NAME="rdpuser"
+          USER_PASS="MacAccess@2026"
           
-          # اضافه کردن به گروه ادمین و فعال سازی دسترسی‌ها
-          sudo dscl . -append /Groups/admin GroupMembership rdpuser
-          sudo dscl . -append /Groups/_appserverusr GroupMembership rdpuser
+          # ایجاد کاربر با ID منحصربه‌فرد (701) برای عدم تداخل با یوزر runner
+          sudo dscl . -create /Users/$USER_NAME
+          sudo dscl . -create /Users/$USER_NAME UserShell /bin/bash
+          sudo dscl . -create /Users/$USER_NAME RealName "Remote Admin"
+          sudo dscl . -create /Users/$USER_NAME UniqueID 701
+          sudo dscl . -create /Users/$USER_NAME PrimaryGroupID 80
+          sudo dscl . -create /Users/$USER_NAME NFSHomeDirectory /Users/$USER_NAME
+          sudo dscl . -passwd /Users/$USER_NAME "$USER_PASS"
           
-          # ساخت دایرکتوری هوم و تنظیم مالکیت
-          sudo mkdir -p /Users/rdpuser
-          sudo chown rdpuser:staff /Users/rdpuser
+          # اضافه کردن به گروه ادمین
+          sudo dscl . -append /Groups/admin GroupMembership $USER_NAME
           
-          echo "User creation successful."
+          # ایجاد پوشه خانگی و تنظیم دسترسی
+          sudo mkdir -p /Users/$USER_NAME
+          sudo chown $USER_NAME:staff /Users/$USER_NAME
+          
+          echo "USER_NAME=$USER_NAME" >> $GITHUB_ENV
+          echo "USER_PASS=$USER_PASS" >> $GITHUB_ENV
 
-      - name: Install & Start Tailscale
+      - name: Install & Configure Tailscale
         env:
           TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          # تغییر دایرکتوری به /tmp برای جلوگیری از خطای shell-init
+          # جابجایی به دایرکتوری موقت
           cd /tmp
           
+          # نصب از طریق Brew (مطمئن‌ترین روش در مک)
           brew install tailscale
+          
+          # اجرای سرویس در پس‌زمینه
           sudo tailscaled > /dev/null 2>&1 &
           sleep 15
           
-          if [ -z "$TS_KEY" ]; then
-            echo "❌ ERROR: TAILSCALE_AUTH_KEY is missing in Secrets!"
+          # عیب‌یابی کلید قبل از اتصال
+          if [[ -z "$TS_KEY" ]]; then
+            echo "❌ خطا: کلید TAILSCALE_AUTH_KEY در Secrets تعریف نشده است!"
+            exit 1
+          fi
+          
+          if [[ ! "$TS_KEY" == tskey-auth-* ]]; then
+            echo "❌ خطا: کلید وارد شده از نوع Auth Key نیست."
+            echo "لطفاً در پنل Tailscale یک کلید که با tskey-auth شروع می‌شود بسازید."
             exit 1
           fi
 
+          # اتصال نهایی
           sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac-runner --accept-routes
           
-          echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
+          # استخراج IP
+          TS_IP=$(tailscale ip -4)
+          echo "TS_IP=$TS_IP" >> $GITHUB_ENV
 
-      - name: Final Connection Info
+      - name: Success & Keep Alive
         run: |
           echo "=========================================="
-          echo "✅ macOS IS READY!"
+          echo "✅ macOS REMOTE ACCESS IS READY!"
+          echo "------------------------------------------"
           echo "📍 Tailscale IP: ${{ env.TS_IP }}"
-          echo "👤 Username: rdpuser"
-          echo "🔑 Password: MacAccess@2026"
+          echo "👤 Username: ${{ env.USER_NAME }}"
+          echo "🔑 Password: ${{ env.USER_PASS }}"
           echo "🔒 VNC Password: SecretVNC123"
+          echo "------------------------------------------"
+          echo "Connection Tool: VNC Viewer (Port 5900)"
           echo "=========================================="
           
-          # حلقه Keep-alive در دایرکتوری امن
+          # جلوگیری از بسته شدن رانر
           cd /tmp
           while true; do
-            echo "Keep-alive: $(date)"
+            echo "Keep-alive: $(date) | IP: ${{ env.TS_IP }} | Status: Active"
             sleep 300
           done
           
