@@ -1,4 +1,4 @@
-name: macOS-14-Final-GUI-Chrome
+name: macOS-14-Native-Web-GUI
 
 on:
   workflow_dispatch:
@@ -9,47 +9,60 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Install Cloudflared and TigerVNC
+      - name: Install Cloudflared & noVNC
         run: |
-          # نصب مستقیم و اجباری
-          brew install cloudflared tiger-vnc
-          # کلون کردن رابط وب
+          # نصب کلودفلر
+          brew install cloudflared
+          # دانلود رابط کاربری تحت وب noVNC
           git clone https://github.com/novnc/noVNC.git /tmp/novnc
 
-      - name: Start VNC and Web Proxy
+      - name: Enable macOS Built-in VNC
         run: |
-          # اضافه کردن تمام مسیرهای ممکن به سیستم
-          export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+          # ۱. تنظیم پسورد VNC مک به "123456" با استفاده از اسکریپت رسمی هش اپل
+          echo "123456" | perl -we 'BEGIN { @k = unpack "C*", pack "H*", "1734516E8BA8C5E2FF1C39567390ADCA"}; $_=<>; chomp; s/\s+$//; @p = unpack "C*", $_; @e = map { shift(@k) ^ $_ } @p; print pack "C*", @e' | sudo tee /Library/Preferences/com.apple.VNCSettings.txt > /dev/null
           
-          # تنظیم پسورد
-          mkdir -p ~/.vnc
-          echo "123456" | /opt/homebrew/bin/vncpasswd -f > ~/.vnc/passwd
-          chmod 600 ~/.vnc/passwd
+          # ۲. روشن کردن سرویس Screen Sharing مک روی پورت دیفالت (5900)
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -clientopts -setvnclegacy -vnclegacy yes -restart -agent -privs -all
           
-          # اجرای سرور گرافیکی (GUI اصلی)
-          /opt/homebrew/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost no
+          # ۳. بیدار نگه داشتن سیستم برای جلوگیری از سیاه شدن تصویر
+          sudo caffeinate -u -t 3600 &
+
+      - name: Create macOS User
+        run: |
+          # ساخت یک یوزر برای ورود به دسکتاپ (اگر در صفحه لاگین گیر کردید)
+          sudo dscl . -create /Users/rdpuser
+          sudo dscl . -create /Users/rdpuser UserShell /bin/bash
+          sudo dscl . -create /Users/rdpuser RealName "RDP User"
+          sudo dscl . -create /Users/rdpuser UniqueID 1001
+          sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
+          sudo dscl . -create /Users/rdpuser NFSHomeDirectory /Users/rdpuser
+          sudo dscl . -passwd /Users/rdpuser "123456"
+          sudo dscl . -append /Groups/admin GroupMembership rdpuser
+
+      - name: Start noVNC and Cloudflare
+        run: |
+          # ۱. متصل کردن VNC داخلی مک (پورت 5900) به پورت وب (6080)
+          /tmp/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
           
-          # اجرای پل ارتباطی وب (noVNC)
-          /tmp/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
-          
-          # اجرای تونل کلودفلر
-          /opt/homebrew/bin/cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
+          # ۲. ایجاد تونل روی پورت وب
+          cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
 
       - name: Get Web Access Link
         run: |
-          sleep 30
+          sleep 15
           echo "=========================================="
-          echo "🌐 آدرس زیر را در مرورگر کروم گوشی باز کنید:"
-          # استخراج لینک از فایل لاگ
-          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log || echo "هنوز لینک آماده نیست، چند لحظه دیگر دوباره چک کنید"
+          echo "🌐 آدرس زیر را در مرورگر کروم باز کنید:"
+          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log || echo "لینک هنوز آماده نیست، دوباره لاگ را چک کنید"
           echo "------------------------------------------"
-          echo "🔑 Password: 123456"
+          echo "🔑 رمز عبور VNC در مرورگر: 123456"
+          echo "👤 نام کاربری مک (در صورت نیاز): rdpuser"
+          echo "🔑 رمز عبور مک (در صورت نیاز): 123456"
           echo "=========================================="
 
       - name: Keep Alive
         run: |
           while true; do
-            echo "GUI is streaming at $(date)"
+            echo "Mac GUI is streaming... $(date)"
             sleep 300
           done
           
