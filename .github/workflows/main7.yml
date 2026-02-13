@@ -1,4 +1,4 @@
-name: macOS-14-Web-GUI-Final-Fix
+name: macOS-14-Final-GUI-Chrome
 
 on:
   workflow_dispatch:
@@ -9,50 +9,47 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Install Tools
+      - name: Install Cloudflared and TigerVNC
         run: |
+          # نصب مستقیم و اجباری
           brew install cloudflared tiger-vnc
+          # کلون کردن رابط وب
           git clone https://github.com/novnc/noVNC.git /tmp/novnc
 
-      - name: Start VNC Server
+      - name: Start VNC and Web Proxy
         run: |
-          # پیدا کردن مسیر با روش استاندارد مک
-          VNC_BIN_PATH=$(dirname $(find /opt/homebrew/Cellar/tiger-vnc -name vncpasswd | head -n 1))
-          echo "Binaries found in: $VNC_BIN_PATH"
+          # اضافه کردن تمام مسیرهای ممکن به سیستم
+          export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
           
-          # اجرای مستقیم با آدرس کامل برای جلوگیری از هرگونه خطا
+          # تنظیم پسورد
           mkdir -p ~/.vnc
-          $VNC_BIN_PATH/vncpasswd -f <<EOF
-          123456
-          123456
-          EOF
+          echo "123456" | /opt/homebrew/bin/vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # اجرای سرور
-          $VNC_BIN_PATH/vncserver :1 -geometry 1280x720 -depth 24 -localhost no
-
-      - name: Launch Web Proxy & Cloudflare
-        run: |
-          # پیدا کردن مسیر کلودفلر
-          CF_BIN=$(find /opt/homebrew/bin /opt/homebrew/sbin -name cloudflared | head -n 1)
+          # اجرای سرور گرافیکی (GUI اصلی)
+          /opt/homebrew/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost no
           
-          # اجرای noVNC
+          # اجرای پل ارتباطی وب (noVNC)
           /tmp/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
           
-          # اجرای کلودفلر
-          $CF_BIN tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
+          # اجرای تونل کلودفلر
+          /opt/homebrew/bin/cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
 
-      - name: Get Access Link
+      - name: Get Web Access Link
         run: |
           sleep 30
           echo "=========================================="
-          echo "🌐 آدرس ورود در مرورگر کروم گوشی:"
-          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log || echo "لینک هنوز آماده نیست، ۳۰ ثانیه دیگر صفحه را رفرش کنید"
+          echo "🌐 آدرس زیر را در مرورگر کروم گوشی باز کنید:"
+          # استخراج لینک از فایل لاگ
+          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log || echo "هنوز لینک آماده نیست، چند لحظه دیگر دوباره چک کنید"
           echo "------------------------------------------"
           echo "🔑 Password: 123456"
           echo "=========================================="
 
       - name: Keep Alive
         run: |
-          while true; do sleep 300; done
+          while true; do
+            echo "GUI is streaming at $(date)"
+            sleep 300
+          done
           
