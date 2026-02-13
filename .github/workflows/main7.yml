@@ -1,4 +1,4 @@
-name: macOS-14-Final-Success-GUI
+name: macOS-14-RDP-User-Fix
 
 on:
   workflow_dispatch:
@@ -14,47 +14,56 @@ jobs:
           brew install cloudflared
           git clone https://github.com/novnc/noVNC.git /tmp/novnc
 
-      - name: Force Fix VNC Authentication
+      - name: Create User and Configure VNC
         run: |
-          # ۱. متوقف کردن کامل سرویس‌های مدیریت از راه دور
+          # ۱. ساخت یوزر rdpuser با پسورد 123456
+          sudo dscl . -create /Users/rdpuser
+          sudo dscl . -create /Users/rdpuser UserShell /bin/bash
+          sudo dscl . -create /Users/rdpuser RealName "RDP User"
+          sudo dscl . -create /Users/rdpuser UniqueID 1001
+          sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
+          sudo dscl . -create /Users/rdpuser NFSHomeDirectory /Users/rdpuser
+          sudo dscl . -passwd /Users/rdpuser "123456"
+          sudo dscl . -append /Groups/admin GroupMembership rdpuser
+
+          # ۲. فعال‌سازی VNC Legacy و تنظیم رمز 123456 (بسیار مهم)
+          # این رشته هگز معادل رمز 123456 است که مک آن را می‌فهمد
+          sudo mkdir -p /Library/Preferences
+          echo "1734516E8BA8C5E2" | xxd -r -p | sudo tee /Library/Preferences/com.apple.VNCSettings.txt > /dev/null
+          sudo chmod 644 /Library/Preferences/com.apple.VNCSettings.txt
+
+          # ۳. تنظیم اجازه دسترسی به یوزر ساخته شده
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -deactivate -stop
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -configure -allowAccessFor -specifiedUsers \
+            -configure -users rdpuser -privs -all \
+            -configure -clientopts -setvnclegacy -vnclegacy yes \
+            -restart -agent
 
-          # ۲. تنظیم اجباری رمز عبور VNC به 123456 در دیتابیس اپل
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -clientopts -setvnclegacy -vnclegacy yes
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -configure -clientopts -setvncpw -vncpw 123456
-
-          # ۳. باز کردن تمام لایه‌های امنیتی برای دسترسی بدون محدودیت
-          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCAlwaysStartOnConsole -bool true
-          sudo defaults write /Library/Preferences/com.apple.RemoteManagement VNCDevicePassword -string "123456"
-          
-          # ۴. فعال‌سازی مجدد سرویس با بالاترین سطح دسترسی (Privileges All)
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -access -on -restart -agent -privs -all
-
-          # ۵. بیدار نگه داشتن سیستم
+          # ۴. بیدار نگه داشتن محیط گرافیکی
           sudo caffeinate -u -t 3600 &
 
       - name: Start noVNC and Cloudflare
         run: |
-          # اجرای پروکسی وب
+          # پورت ۵۹۰۰ مک به ۶۰۸۰ وب
           /tmp/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
           
           # ایجاد تونل کلودفلر
           cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
 
-      - name: Get Connection Link
+      - name: Get Web Link
         run: |
           sleep 20
           echo "=========================================="
-          echo "🌐 آدرس ورود در مرورگر کروم:"
+          echo "🌐 OPEN THIS LINK IN CHROME:"
           grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log
           echo "------------------------------------------"
-          echo "🔑 Password: 123456"
+          echo "🔑 VNC Password: 123456"
+          echo "👤 User: rdpuser | Pass: 123456"
           echo "=========================================="
 
       - name: Keep Alive
         run: |
-          while true; do
-            echo "Mac GUI is running... $(date)"
-            sleep 300
-          done
+          while true; do sleep 300; done
           
