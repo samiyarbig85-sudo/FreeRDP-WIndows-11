@@ -1,49 +1,53 @@
-name: macOS-Web-Desktop-Cloudflare
+name: macOS-14-Web-GUI
 
 on:
   workflow_dispatch:
 
 jobs:
-  macos-web-vnc:
-    # استفاده از macos-13 معمولاً سریع‌تر از latest رانر پیدا می‌کند
+  macos-gui:
+    # استفاده از نسخه 14 مطابق درخواست شما
     runs-on: macos-14
     timeout-minutes: 3600
 
     steps:
       - name: Install Dependencies
         run: |
-          # نصب کلودفلر و تایگر وی‌ان‌سی
+          # نصب ابزارها
           brew install cloudflared tiger-vnc
-          # دانلود رابط وب noVNC
+          # دانلود noVNC
           git clone https://github.com/novnc/noVNC.git /tmp/novnc
 
-      - name: Setup TigerVNC Server
+      - name: Setup VNC Server
         run: |
-          # تنظیم پسورد VNC (123456)
+          # اضافه کردن مسیر Brew به PATH برای شناسایی دستور vncpasswd
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          
+          # ایجاد دایرکتوری تنظیمات
           mkdir -p ~/.vnc
+          
+          # تنظیم پسورد VNC (123456)
           echo "123456" | vncpasswd -f > ~/.vnc/passwd
           chmod 600 ~/.vnc/passwd
           
-          # اجرای سرور وی‌ان‌سی در پس‌زمینه (رزولوشن 720p)
+          # اجرای سرور VNC روی پورت 5901
           vncserver :1 -geometry 1280x720 -depth 24 -localhost no
 
       - name: Launch noVNC Proxy
         run: |
-          # تبدیل پروتکل VNC به Web-Socket روی پورت 6080
+          # تبدیل VNC به وب (پورت 6080)
           /tmp/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
 
       - name: Start Cloudflare Tunnel
         run: |
-          # ایجاد تونل کلودفلر برای پورت وب (6080)
-          # خروجی در فایل لوگ ذخیره می‌شود تا لینک استخراج شود
+          # ایجاد تونل کلودفلر
           cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
 
-      - name: Extract Web Link & Connection Info
+      - name: Get Web Link
         run: |
           sleep 20
           echo "=========================================="
-          echo "🌐 COPY AND OPEN THIS LINK IN CHROME:"
-          # استخراج لینک اختصاصی کلودفلر
+          echo "🌐 آدرس زیر را در مرورگر کروم گوشی باز کنید:"
+          # پیدا کردن لینک کلودفلر از فایل لوگ
           grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log
           echo "------------------------------------------"
           echo "🔑 Password: 123456"
@@ -51,9 +55,8 @@ jobs:
 
       - name: Keep Alive
         run: |
-          # زنده نگه داشتن رانر
           while true; do
-            echo "Runner is running... $(date)"
+            echo "GUI is Active on macOS 14... $(date)"
             sleep 300
           done
           
