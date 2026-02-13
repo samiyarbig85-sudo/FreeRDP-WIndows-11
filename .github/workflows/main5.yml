@@ -1,0 +1,69 @@
+name: macOS-Remote-Desktop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  secure-vnc:
+    runs-on: macos-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Enable Remote Desktop (VNC)
+        run: |
+          # فعال‌سازی Screen Sharing (VNC)
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -clientopts -setvncpw -vncpw "P@ssword123!" \
+            -restart -agent -privs -all
+          
+          # اجازه دسترسی به همه کاربران (برای اطمینان در محیط Runner)
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -allowAccessFor -allUsers -privs -all
+
+      - name: Create Admin User
+        run: |
+          # ایجاد یک کاربر جدید به نام MacUser
+          USERNAME="MacUser"
+          PASSWORD="SecurePassword123!"
+          
+          sudo dscl . -create /Users/$USERNAME
+          sudo dscl . -create /Users/$USERNAME UserShell /bin/bash
+          sudo dscl . -create /Users/$USERNAME RealName "Remote User"
+          sudo dscl . -create /Users/$USERNAME UniqueID "501"
+          sudo dscl . -create /Users/$USERNAME PrimaryGroupID 20
+          sudo dscl . -create /Users/$USERNAME NFSHomeDirectory /Users/$USERNAME
+          sudo dscl . -passwd /Users/$USERNAME $PASSWORD
+          sudo dscl . -append /Groups/admin GroupMembership $USERNAME
+          
+          echo "MAC_CREDS=User: $USERNAME | Pass: $PASSWORD | VNCPass: P@ssword123!" >> $GITHUB_ENV
+
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Establish Tailscale Connection
+        env:
+          TAILSCALE_AUTHKEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          # اجرای Tailscale
+          sudo tailscaled > /dev/null 2>&1 &
+          sleep 5
+          sudo tailscale up --authkey=${TAILSCALE_AUTHKEY} --hostname=gh-mac-${{ github.run_id }}
+          
+          TS_IP=$(tailscale ip -4)
+          echo "TAILSCALE_IP=$TS_IP" >> $GITHUB_ENV
+
+      - name: Maintain Connection
+        run: |
+          echo "--------------------------------------"
+          echo "macOS Remote Access Information:"
+          echo "VNC Address: ${{ env.TAILSCALE_IP }}"
+          echo "System $MAC_CREDS"
+          echo "--------------------------------------"
+          echo "Keep-alive started..."
+          while true; do
+            echo "Runner is active... $(date)"
+            sleep 300
+          done
+          
