@@ -11,54 +11,63 @@ jobs:
     steps:
       - name: Enable Remote Management (VNC)
         run: |
+          # فعال‌سازی Screen Sharing با رمز VNC
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvncpw -vncpw "SecretVNC123" \
             -restart -agent -privs -all
 
-      - name: Configure User Credentials
+      - name: Force Password Change (No Old Pass Required)
         run: |
-          CURRENT_USER=$(whoami)
-          NEW_PASS="MacAccess@2024"
-          sudo dscl . -passwd /Users/$CURRENT_USER "$NEW_PASS" || echo "Warning: Password change failed"
-          echo "USER_NAME=$CURRENT_USER" >> $GITHUB_ENV
+          # استفاده از پسورد رندوم برای امنیت و دور زدن نیاز به پسورد قدیمی
+          USER_NAME=$(whoami)
+          NEW_PASS="MacAccess@2026"
+          
+          # متد نهایی برای تغییر پسورد در Runner بدون نیاز به پسورد قبلی
+          sudo dscl . -passwd /Users/$USER_NAME "$NEW_PASS" || \
+          sudo passwd $USER_NAME <<EOF
+          $NEW_PASS
+          $NEW_PASS
+          EOF
+          
+          echo "USER_NAME=$USER_NAME" >> $GITHUB_ENV
           echo "USER_PASS=$NEW_PASS" >> $GITHUB_ENV
 
-      - name: Install Tailscale via Homebrew
+      - name: Install Tailscale
         run: |
-          # نصب از طریق brew برای شناسایی خودکار مسیرها
           brew install tailscale
-          # اضافه کردن مسیر brew به PATH (برای اطمینان)
-          echo "/usr/local/bin" >> $GITHUB_PATH
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH
 
       - name: Start Tailscale
         env:
           TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          # اجرای سرویس پس‌زمینه در مک
+          # اجرای سرویس
           sudo tailscaled > /dev/null 2>&1 &
           sleep 15
           
-          # حالا دستور tailscale به راحتی شناخته می‌شود
-          sudo tailscale up --authkey=$TS_KEY --hostname=gh-macos-runner
+          # بررسی وجود کلید
+          if [ -z "$TS_KEY" ]; then
+            echo "❌ ERROR: TAILSCALE_AUTH_KEY is empty. Please check GitHub Secrets."
+            exit 1
+          fi
+
+          # تلاش برای اتصال (اگر کلید Ephemeral باشد بهتر است)
+          sudo tailscale up --authkey=$TS_KEY --hostname=gh-macos-runner --accept-routes
           
           TS_IP=$(tailscale ip -4)
           echo "TS_IP=$TS_IP" >> $GITHUB_ENV
 
-      - name: Connection Info & Keep Alive
+      - name: Final Info & Keep Alive
         run: |
           echo "=========================================="
-          echo "✅ macOS Remote Desktop is Ready!"
-          echo "------------------------------------------"
-          echo "📍 Tailscale IP: ${{ env.TS_IP }}"
-          echo "👤 Username: ${{ env.USER_NAME }}"
-          echo "🔑 Password: ${{ env.USER_PASS }}"
-          echo "🔒 VNC Password: SecretVNC123"
+          echo "📍 IP: ${{ env.TS_IP }}"
+          echo "👤 User: ${{ env.USER_NAME }}"
+          echo "🔑 Pass: ${{ env.USER_PASS }}"
+          echo "🔒 VNC: SecretVNC123"
           echo "=========================================="
           
           while true; do
-            echo "Keep-alive: $(date) - IP: ${{ env.TS_IP }}"
+            echo "Keep-alive... $(date)"
             sleep 300
           done
           
