@@ -1,4 +1,4 @@
-name: macOS-14-Web-GUI-DirectPath
+name: macOS-14-Web-GUI-Ultra-Fix
 
 on:
   workflow_dispatch:
@@ -9,46 +9,50 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Install and Setup VNC Server
+      - name: Install Tools
         run: |
-          # ۱. نصب ابزارها
           brew install cloudflared tiger-vnc
+          git clone https://github.com/novnc/noVNC.git /tmp/novnc
+
+      - name: Locate and Start VNC Server
+        run: |
+          # ۱. پیدا کردن آدرس دقیق فایل‌های اجرایی TigerVNC در سیستم
+          VNC_PATH=$(find /opt/homebrew/Cellar/tiger-vnc -name vncpasswd -parent | head -n 1)
+          echo "Found VNC binaries at: $VNC_PATH"
           
-          # ۲. ایجاد دایرکتوری تنظیمات
+          # ۲. اضافه کردن آدرس پیدا شده به مسیرهای سیستم
+          export PATH="$VNC_PATH:$PATH"
+          
+          # ۳. تنظیم پسورد
           mkdir -p ~/.vnc
-          
-          # ۳. استفاده از مسیر مستقیم برای vncpasswd (رفع ارور 127)
-          # در مک‌های سری M مسیر معمولاً /opt/homebrew/bin/ است
-          /opt/homebrew/bin/vncpasswd -f <<EOF
+          vncpasswd -f <<EOF
           123456
           123456
           EOF
-          
           chmod 600 ~/.vnc/passwd
           
-          # ۴. اجرای سرور VNC با آدرس کامل
-          /opt/homebrew/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost no
-          
-          # ۵. دانلود noVNC
-          git clone https://github.com/novnc/noVNC.git /tmp/novnc
+          # ۴. اجرای سرور
+          vncserver :1 -geometry 1280x720 -depth 24 -localhost no
 
-      - name: Launch noVNC and Cloudflare
+      - name: Launch Web Proxy & Cloudflare
         run: |
-          # تبدیل VNC به وب
+          # پیدا کردن آدرس کلودفلر (با توجه به اروری که دادی)
+          CF_PATH=$(find /opt/homebrew -name cloudflared | head -n 1)
+          
+          # اجرای noVNC
           /tmp/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
           
-          # اجرای کلودفلر با آدرس کامل (طبق اروری که دادی در این مسیر است)
-          /opt/homebrew/bin/cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
+          # اجرای کلودفلر
+          $CF_PATH tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
 
       - name: Get Access Link
         run: |
-          # صبر برای تولید لینک
           sleep 30
           echo "=========================================="
-          echo "🌐 لینک ورود (در مرورگر باز کنید):"
-          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log || echo "لینک هنوز تولید نشده، دوباره لاگ را چک کنید"
+          echo "🌐 آدرس ورود در مرورگر کروم گوشی:"
+          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log || echo "هنوز لینک تولید نشده، ۳۰ ثانیه دیگر لاگ را چک کنید"
           echo "------------------------------------------"
-          echo "🔑 VNC Password: 123456"
+          echo "🔑 Password: 123456"
           echo "=========================================="
 
       - name: Keep Alive
