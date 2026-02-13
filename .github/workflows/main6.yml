@@ -11,7 +11,6 @@ jobs:
     steps:
       - name: Enable Remote Management (VNC)
         run: |
-          # فعال‌سازی VNC با پسورد اختصاصی
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvncpw -vncpw "SecretVNC123" \
@@ -19,7 +18,10 @@ jobs:
 
       - name: Create New Admin User
         run: |
-          # ایجاد یک یوزر جدید با نام rdpuser و ID غیرتکراری (701)
+          # رفتن به دایرکتوری روت برای جلوگیری از خطای Permission Denied در دایرکتوری فعلی
+          cd /
+          
+          # ایجاد کاربر جدید
           sudo dscl . -create /Users/rdpuser
           sudo dscl . -create /Users/rdpuser UserShell /bin/bash
           sudo dscl . -create /Users/rdpuser RealName "Remote Admin"
@@ -27,29 +29,38 @@ jobs:
           sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
           sudo dscl . -create /Users/rdpuser NFSHomeDirectory /Users/rdpuser
           sudo dscl . -passwd /Users/rdpuser "MacAccess@2026"
-          sudo dscl . -append /Groups/admin GroupMembership rdpuser
           
-          # ساخت دایرکتوری هوم برای یوزر جدید
-          sudo createhomedir -c -u rdpuser > /dev/null
+          # اضافه کردن به گروه ادمین و فعال سازی دسترسی‌ها
+          sudo dscl . -append /Groups/admin GroupMembership rdpuser
+          sudo dscl . -append /Groups/_appserverusr GroupMembership rdpuser
+          
+          # ساخت دایرکتوری هوم و تنظیم مالکیت
+          sudo mkdir -p /Users/rdpuser
+          sudo chown rdpuser:staff /Users/rdpuser
+          
+          echo "User creation successful."
 
       - name: Install & Start Tailscale
         env:
           TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
+          # تغییر دایرکتوری به /tmp برای جلوگیری از خطای shell-init
+          cd /tmp
+          
           brew install tailscale
           sudo tailscaled > /dev/null 2>&1 &
           sleep 15
           
-          # اگر کلید نامعتبر باشد، این مرحله با پیام شفاف متوقف می‌شود
-          if ! sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac-runner --accept-routes; then
-            echo "❌ ERROR: The Tailscale Auth Key is invalid or expired."
-            echo "Please generate a new REUSABLE & EPHEMERAL key from Tailscale Admin Console."
+          if [ -z "$TS_KEY" ]; then
+            echo "❌ ERROR: TAILSCALE_AUTH_KEY is missing in Secrets!"
             exit 1
           fi
+
+          sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac-runner --accept-routes
           
           echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
 
-      - name: Final Credentials
+      - name: Final Connection Info
         run: |
           echo "=========================================="
           echo "✅ macOS IS READY!"
@@ -59,7 +70,10 @@ jobs:
           echo "🔒 VNC Password: SecretVNC123"
           echo "=========================================="
           
+          # حلقه Keep-alive در دایرکتوری امن
+          cd /tmp
           while true; do
             echo "Keep-alive: $(date)"
             sleep 300
           done
+          
