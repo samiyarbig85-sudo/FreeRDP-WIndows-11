@@ -21,22 +21,20 @@ jobs:
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -configure -allowAccessFor -allUsers -privs -all
 
-      - name: Create Admin User
+            - name: Configure Existing User for Remote Access
         run: |
-          # ایجاد یک کاربر جدید به نام MacUser
-          USERNAME="MacUser"
+          # تغییر پسورد یوزر فعلی (runner)
+          USERNAME=$(whoami)
           PASSWORD="SecurePassword123!"
           
-          sudo dscl . -create /Users/$USERNAME
-          sudo dscl . -create /Users/$USERNAME UserShell /bin/bash
-          sudo dscl . -create /Users/$USERNAME RealName "Remote User"
-          sudo dscl . -create /Users/$USERNAME UniqueID "501"
-          sudo dscl . -create /Users/$USERNAME PrimaryGroupID 20
-          sudo dscl . -create /Users/$USERNAME NFSHomeDirectory /Users/$USERNAME
+          echo "Setting password for user: $USERNAME"
           sudo dscl . -passwd /Users/$USERNAME $PASSWORD
-          sudo dscl . -append /Groups/admin GroupMembership $USERNAME
           
+          # نمایش اطلاعات برای لاگین
           echo "MAC_CREDS=User: $USERNAME | Pass: $PASSWORD | VNCPass: P@ssword123!" >> $GITHUB_ENV
+          
+          # اطمینان از دسترسی ادمین (هرچند runner معمولاً ادمین است)
+          sudo dscl . -append /Groups/admin GroupMembership $USERNAME
 
       - name: Install Tailscale
         run: |
