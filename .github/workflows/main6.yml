@@ -1,4 +1,4 @@
-name: macOS-Remote-Desktop-Full-GUI
+name: macOS-Remote-Desktop-Final-Fix
 
 on:
   workflow_dispatch:
@@ -9,79 +9,53 @@ jobs:
     timeout-minutes: 3600
 
     steps:
-      - name: Enable Remote Management & GUI Fix
+      - name: Force Enable VNC & Fix Authentication
         run: |
-          # فعال‌سازی سرویس اشتراک‌گذاری صفحه
+          # متوقف کردن سرویس برای اعمال تنظیمات جدید
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -deactivate
+          
+          # تنظیم پسورد VNC به روش مستقیم (فایل سیستم)
+          # رمز عبور در اینجا: 123456 (برای سادگی در تایپ موبایل)
+          sudo /usr/libexec/PlistBuddy -c "Delete :VNCPassword" /Library/Preferences/com.apple.VNCSettings.txt || true
+          echo "123456" | perl -we 'BEGIN { @k = unpack "C*", pack "H*", "1734516E8BA8C5E2FF1C39567390ADCA"}; $_=<>; chomp; s/\s+$//; @p = unpack "C*", $_; @e = map { shift(@k) ^ $_ } @p; print pack "C*", @e' | sudo tee /Library/Preferences/com.apple.VNCSettings.txt > /dev/null
+          
+          # استارت مجدد با دسترسی کامل
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
-            -clientopts -setvncpw -vncpw "SecretVNC123" \
+            -clientopts -setvnclegacy -vnclegacy yes \
             -restart -agent -privs -all
-          
-          # بیدار نگه داشتن سیستم برای جلوگیری از سیاه شدن صفحه
-          sudo caffeinate -u -t 3600 &
 
-      - name: Create Isolated Admin User
+      - name: Create User & Wake GUI
         run: |
-          cd /
-          USER_NAME="rdpuser"
-          USER_PASS="MacAccess@2026"
+          # ساخت یوزر rdpuser (اگر از قبل ساخته شده باشد ارور نمی‌دهد)
+          sudo dscl . -create /Users/rdpuser || true
+          sudo dscl . -create /Users/rdpuser UserShell /bin/bash || true
+          sudo dscl . -passwd /Users/rdpuser "MacAccess@2026" || true
+          sudo dscl . -append /Groups/admin GroupMembership rdpuser || true
           
-          # ساخت یوزر جدید برای دور زدن محدودیت‌های پسورد رانر
-          sudo dscl . -create /Users/$USER_NAME
-          sudo dscl . -create /Users/$USER_NAME UserShell /bin/bash
-          sudo dscl . -create /Users/$USER_NAME RealName "Remote Admin"
-          sudo dscl . -create /Users/$USER_NAME UniqueID 701
-          sudo dscl . -create /Users/$USER_NAME PrimaryGroupID 80
-          sudo dscl . -create /Users/$USER_NAME NFSHomeDirectory /Users/$USER_NAME
-          sudo dscl . -passwd /Users/$USER_NAME "$USER_PASS"
-          sudo dscl . -append /Groups/admin GroupMembership $USER_NAME
-          
-          sudo mkdir -p /Users/$USER_NAME
-          sudo chown $USER_NAME:staff /Users/$USER_NAME
-          
-          echo "USER_NAME=$USER_NAME" >> $GITHUB_ENV
-          echo "USER_PASS=$USER_PASS" >> $GITHUB_ENV
+          # باز کردن یک اپلیکیشن برای بیدار کردن محیط گرافیکی
+          open -a Finder
+          open -a Calculator
 
-      - name: Install Tailscale & Display Tools
-        run: |
-          cd /tmp
-          # نصب Tailscale و ابزار تنظیم رزولوشن
-          brew install tailscale displayplacer
-          
-          # تلاش برای تنظیم رزولوشن (برای رفع مشکل صفحه سیاه)
-          displayplacer "res:1280x720 color_depth:8 scaling:on" || echo "Display resize failed, but continuing..."
-
-      - name: Start Tailscale
+      - name: Install & Start Tailscale
         env:
           TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          cd /tmp
+          brew install tailscale
           sudo tailscaled > /dev/null 2>&1 &
-          sleep 15
-          
-          if [[ -z "$TS_KEY" ]]; then
-            echo "❌ ERROR: TAILSCALE_AUTH_KEY is missing!"
-            exit 1
-          fi
-
-          sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac-gui --accept-routes
+          sleep 10
+          sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac
           echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
 
-      - name: Final Credentials & Keep Alive
+      - name: Display Connection Info
         run: |
           echo "=========================================="
-          echo "✅ macOS GUI IS READY!"
-          echo "------------------------------------------"
-          echo "📍 Tailscale IP: ${{ env.TS_IP }}"
-          echo "👤 Username: ${{ env.USER_NAME }}"
-          echo "🔑 Password: ${{ env.USER_PASS }}"
-          echo "🔒 VNC Password: SecretVNC123"
+          echo "📍 IP: ${{ env.TS_IP }}"
+          echo "👤 OS User: rdpuser"
+          echo "🔑 OS Pass: MacAccess@2026"
+          echo "🔒 VNC Pass: 123456"
           echo "=========================================="
-          echo "نکته: اگر هنوز صفحه سیاه است، یکبار کلید Enter را بزنید و پسورد سیستم را تایپ کنید."
           
-          cd /tmp
-          while true; do
-            echo "Runner Active: $(date) | IP: ${{ env.TS_IP }}"
-            sleep 300
-          done
+          # Keep Alive
+          while true; do sleep 300; done
           
