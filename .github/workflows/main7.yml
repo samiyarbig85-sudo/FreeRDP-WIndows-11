@@ -1,0 +1,59 @@
+name: macOS-Web-Desktop-Cloudflare
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-web-vnc:
+    # استفاده از macos-13 معمولاً سریع‌تر از latest رانر پیدا می‌کند
+    runs-on: macos-13
+    timeout-minutes: 3600
+
+    steps:
+      - name: Install Dependencies
+        run: |
+          # نصب کلودفلر و تایگر وی‌ان‌سی
+          brew install cloudflared tiger-vnc
+          # دانلود رابط وب noVNC
+          git clone https://github.com/novnc/noVNC.git /tmp/novnc
+
+      - name: Setup TigerVNC Server
+        run: |
+          # تنظیم پسورد VNC (123456)
+          mkdir -p ~/.vnc
+          echo "123456" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+          
+          # اجرای سرور وی‌ان‌سی در پس‌زمینه (رزولوشن 720p)
+          vncserver :1 -geometry 1280x720 -depth 24 -localhost no
+
+      - name: Launch noVNC Proxy
+        run: |
+          # تبدیل پروتکل VNC به Web-Socket روی پورت 6080
+          /tmp/novnc/utils/novnc_proxy --vnc localhost:5901 --listen 6080 &
+
+      - name: Start Cloudflare Tunnel
+        run: |
+          # ایجاد تونل کلودفلر برای پورت وب (6080)
+          # خروجی در فایل لوگ ذخیره می‌شود تا لینک استخراج شود
+          cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
+
+      - name: Extract Web Link & Connection Info
+        run: |
+          sleep 20
+          echo "=========================================="
+          echo "🌐 COPY AND OPEN THIS LINK IN CHROME:"
+          # استخراج لینک اختصاصی کلودفلر
+          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log
+          echo "------------------------------------------"
+          echo "🔑 Password: 123456"
+          echo "=========================================="
+
+      - name: Keep Alive
+        run: |
+          # زنده نگه داشتن رانر
+          while true; do
+            echo "Runner is running... $(date)"
+            sleep 300
+          done
+          
