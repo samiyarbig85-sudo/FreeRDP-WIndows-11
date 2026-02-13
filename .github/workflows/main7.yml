@@ -16,14 +16,14 @@ jobs:
 
       - name: Create User and Configure VNC
         run: |
-          # ۱. ساخت یوزر rdpuser با پسورد 123456
+          # ۱. ساخت یوزر rdpuser با پسورد @Sun2134
           sudo dscl . -create /Users/rdpuser
           sudo dscl . -create /Users/rdpuser UserShell /bin/bash
           sudo dscl . -create /Users/rdpuser RealName "RDP User"
           sudo dscl . -create /Users/rdpuser UniqueID 1001
           sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
           sudo dscl . -create /Users/rdpuser NFSHomeDirectory /Users/rdpuser
-          sudo dscl . -passwd /Users/rdpuser "123456"
+          sudo dscl . -passwd /Users/rdpuser "@Sun2134"
           sudo dscl . -append /Groups/admin GroupMembership rdpuser
 
           # ۲. فعال‌سازی VNC Legacy و تنظیم رمز 123456 (بسیار مهم)
