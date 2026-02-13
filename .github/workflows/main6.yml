@@ -11,63 +11,55 @@ jobs:
     steps:
       - name: Enable Remote Management (VNC)
         run: |
-          # فعال‌سازی Screen Sharing با رمز VNC
+          # فعال‌سازی VNC با پسورد اختصاصی
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
             -activate -configure -access -on \
             -clientopts -setvncpw -vncpw "SecretVNC123" \
             -restart -agent -privs -all
 
-      - name: Force Password Change (No Old Pass Required)
+      - name: Create New Admin User
         run: |
-          # استفاده از پسورد رندوم برای امنیت و دور زدن نیاز به پسورد قدیمی
-          USER_NAME=$(whoami)
-          NEW_PASS="MacAccess@2026"
+          # ایجاد یک یوزر جدید با نام rdpuser و ID غیرتکراری (701)
+          sudo dscl . -create /Users/rdpuser
+          sudo dscl . -create /Users/rdpuser UserShell /bin/bash
+          sudo dscl . -create /Users/rdpuser RealName "Remote Admin"
+          sudo dscl . -create /Users/rdpuser UniqueID 701
+          sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
+          sudo dscl . -create /Users/rdpuser NFSHomeDirectory /Users/rdpuser
+          sudo dscl . -passwd /Users/rdpuser "MacAccess@2026"
+          sudo dscl . -append /Groups/admin GroupMembership rdpuser
           
-          # متد نهایی برای تغییر پسورد در Runner بدون نیاز به پسورد قبلی
-          sudo dscl . -passwd /Users/$USER_NAME "$NEW_PASS" || \
-          sudo passwd $USER_NAME <<EOF
-          $NEW_PASS
-          $NEW_PASS
-          EOF
-          
-          echo "USER_NAME=$USER_NAME" >> $GITHUB_ENV
-          echo "USER_PASS=$NEW_PASS" >> $GITHUB_ENV
+          # ساخت دایرکتوری هوم برای یوزر جدید
+          sudo createhomedir -c -u rdpuser > /dev/null
 
-      - name: Install Tailscale
-        run: |
-          brew install tailscale
-
-      - name: Start Tailscale
+      - name: Install & Start Tailscale
         env:
           TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
         run: |
-          # اجرای سرویس
+          brew install tailscale
           sudo tailscaled > /dev/null 2>&1 &
           sleep 15
           
-          # بررسی وجود کلید
-          if [ -z "$TS_KEY" ]; then
-            echo "❌ ERROR: TAILSCALE_AUTH_KEY is empty. Please check GitHub Secrets."
+          # اگر کلید نامعتبر باشد، این مرحله با پیام شفاف متوقف می‌شود
+          if ! sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac-runner --accept-routes; then
+            echo "❌ ERROR: The Tailscale Auth Key is invalid or expired."
+            echo "Please generate a new REUSABLE & EPHEMERAL key from Tailscale Admin Console."
             exit 1
           fi
-
-          # تلاش برای اتصال (اگر کلید Ephemeral باشد بهتر است)
-          sudo tailscale up --authkey=$TS_KEY --hostname=gh-macos-runner --accept-routes
           
-          TS_IP=$(tailscale ip -4)
-          echo "TS_IP=$TS_IP" >> $GITHUB_ENV
+          echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
 
-      - name: Final Info & Keep Alive
+      - name: Final Credentials
         run: |
           echo "=========================================="
-          echo "📍 IP: ${{ env.TS_IP }}"
-          echo "👤 User: ${{ env.USER_NAME }}"
-          echo "🔑 Pass: ${{ env.USER_PASS }}"
-          echo "🔒 VNC: SecretVNC123"
+          echo "✅ macOS IS READY!"
+          echo "📍 Tailscale IP: ${{ env.TS_IP }}"
+          echo "👤 Username: rdpuser"
+          echo "🔑 Password: MacAccess@2026"
+          echo "🔒 VNC Password: SecretVNC123"
           echo "=========================================="
           
           while true; do
-            echo "Keep-alive... $(date)"
+            echo "Keep-alive: $(date)"
             sleep 300
           done
-          
