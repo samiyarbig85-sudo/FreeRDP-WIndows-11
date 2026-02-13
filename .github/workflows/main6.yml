@@ -1,4 +1,4 @@
-name: macOS-Ultimate-Fix
+name: macOS-Cloudflare-VNC
 
 on:
   workflow_dispatch:
@@ -6,57 +6,41 @@ on:
 jobs:
   macos-vnc:
     runs-on: macos-latest
-    timeout-minutes: 3600
-
     steps:
-      - name: Force Auto-Login & Disable Passwords
+      - name: Install Cloudflared and VNC
         run: |
-          # ایجاد یوزر
-          sudo dscl . -create /Users/rdpuser
-          sudo dscl . -create /Users/rdpuser UserShell /bin/bash
-          sudo dscl . -create /Users/rdpuser UniqueID 701
-          sudo dscl . -create /Users/rdpuser PrimaryGroupID 80
-          sudo dscl . -passwd /Users/rdpuser "123456"
-          sudo dscl . -append /Groups/admin GroupMembership rdpuser
-          
-          # فعال کردن لاگین خودکار (این حرکت صفحه سیاه را حذف می‌کند)
-          sudo python3 -c '
-          import os
-          print("Setting up auto-login...")
-          os.system("sudo defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string rdpuser")
-          '
-          
-          # غیرفعال کردن اسکرین سیور و قفل صفحه
-          sudo defaults write com.apple.screensaver idleTime 0
-          sudo defaults write com.apple.loginwindow DisableScreenLock -bool true
+          brew install cloudflared tiger-vnc
 
-      - name: Start Screen Sharing (No Auth Mode)
+      - name: Setup VNC Server
         run: |
-          # اجازه دسترسی کامل بدون محدودیت‌های امنیتی سخت‌گیرانه
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on \
-            -clientopts -setvncpw -vncpw "123456" \
-            -restart -agent -privs -all
+          # تنظیم پسورد VNC
+          mkdir -p ~/.vnc
+          echo "123456" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
           
-          # بیدار کردن گرافیک
-          Caffeinate -u -t 3600 &
+          # اجرای سرور VNC روی پورت 5901
+          vncserver :1 -geometry 1280x720 -depth 24 -localhost no
 
-      - name: Install & Start Tailscale
-        env:
-          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+      - name: Start Cloudflare Tunnel
         run: |
-          brew install tailscale
-          sudo tailscaled > /dev/null 2>&1 &
+          # ایجاد یک تونل موقت (Quick Tunnel)
+          # خروجی این دستور شامل یک لینک .trycloudflare.com خواهد بود
+          cloudflared tunnel --url tcp://localhost:5901 > cloudflare.log 2>&1 &
+          
+      - name: Get Connection Link
+        run: |
           sleep 10
-          sudo tailscale up --authkey=$TS_KEY --hostname=gh-mac
-          echo "TS_IP=$(tailscale ip -4)" >> $GITHUB_ENV
+          echo "=========================================="
+          echo "🔗 Cloudflare Tunnel Address:"
+          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log | sed 's/https/tcp/'
+          echo "------------------------------------------"
+          echo "🔑 VNC Password: 123456"
+          echo "=========================================="
 
-      - name: Connection Info
+      - name: Keep Alive
         run: |
-          echo "=========================================="
-          echo "📍 IP: ${{ env.TS_IP }}"
-          echo "🔒 VNC Password: 123456"
-          echo "👤 User Password: 123456"
-          echo "=========================================="
-          while true; do sleep 300; done
+          while true; do
+            echo "Runner status: Active $(date)"
+            sleep 300
+          done
           
