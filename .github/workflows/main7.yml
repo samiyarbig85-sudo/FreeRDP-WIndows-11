@@ -1,4 +1,4 @@
-name: macOS-14-Auth-Fixed-GUI
+name: macOS-14-Final-Auth-Fix
 
 on:
   workflow_dispatch:
@@ -14,44 +14,47 @@ jobs:
           brew install cloudflared
           git clone https://github.com/novnc/noVNC.git /tmp/novnc
 
-      - name: Fix Apple VNC Authentication
+      - name: Force Enable Apple VNC with Password
         run: |
-          echo "Configuring VNC for the active runner user..."
-          
-          # ۱. پاک کردن تنظیمات و پسوردهای گیر کرده قبلی
-          sudo rm -f /Library/Preferences/com.apple.VNCSettings.txt
-          
-          # ۲. ساخت پسورد 123456 با هش مخصوص اپل
-          echo -n "123456" | perl -we 'BEGIN { @k = unpack "C*", pack "H*", "1734516E8BA8C5E2FF1C39567390ADCA"}; $_=<>; chomp; s/\s+$//; @p = unpack "C*", $_; @e = map { shift(@k) ^ $_ } @p; print pack "C*", @e' | sudo tee /Library/Preferences/com.apple.VNCSettings.txt > /dev/null
-          # دادن دسترسی خواندن به سیستم برای جلوگیری از ارور
-          sudo chmod 444 /Library/Preferences/com.apple.VNCSettings.txt
-          
-          # ۳. ریستارت کامل سرویس اسکرین‌شرینگ اپل با دسترسی آزاد برای VNC
+          # ۱. متوقف کردن سرویس برای اعمال تغییرات
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -deactivate -stop
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart -activate -configure -allowAccessFor -allUsers -access -on -clientopts -setvnclegacy -vnclegacy yes -privs -all -restart -agent
-          
-          # ۴. بیدار نگه داشتن دسکتاپ
+
+          # ۲. تنظیم مستقیم پسورد VNC به ۱۲۳۴۵۶ (روش رسمی برای Sonoma)
+          # این دستور مستقیم رمز را در لایه امنیتی اپل ست می‌کند
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvnclegacy -vnclegacy yes \
+            -configure -clientopts -setvncpw -vncpw 123456
+
+          # ۳. فعال‌سازی دسترسی برای همه یوزرهای سیستم (از جمله runner)
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -restart -agent -privs -all
+
+          # ۴. بیدار نگه داشتن دسکتاپ برای جلوگیری از قطع شدن تصویر
           sudo caffeinate -u -t 3600 &
 
-      - name: Start Web Proxy & Cloudflare
+      - name: Start noVNC and Cloudflare
         run: |
-          # وصل کردن noVNC مستقیم به دسکتاپ مک
+          # متصل کردن پورت داخلی مک (5900) به پورت وب (6080)
           /tmp/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
           
-          # ساخت تونل روی وب
+          # ایجاد تونل کلودفلر
           cloudflared tunnel --url http://localhost:6080 > cloudflare.log 2>&1 &
 
-      - name: Get Web Access Link
+      - name: Get Connection Link
         run: |
-          sleep 15
+          sleep 20
           echo "=========================================="
-          echo "🌐 آدرس زیر را در کروم گوشی باز کنید:"
-          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log || echo "لینک هنوز آماده نیست، دوباره لاگ را چک کنید"
+          echo "🌐 لینک ورود در مرورگر کروم:"
+          grep -o 'https://[-0-9a-z]*\.trycloudflare.com' cloudflare.log
           echo "------------------------------------------"
-          echo "🔑 Password: 123456"
+          echo "🔑 Password for VNC: 123456"
           echo "=========================================="
 
       - name: Keep Alive
         run: |
-          while true; do sleep 300; done
+          while true; do
+            echo "GUI is Active... $(date)"
+            sleep 300
+          done
           
