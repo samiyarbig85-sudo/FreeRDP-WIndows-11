@@ -1,0 +1,80 @@
+name: macOS-Remote-Desktop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  macos-vnc:
+    runs-on: macos-latest
+    timeout-minutes: 3600
+
+    steps:
+      - name: Enable Remote Management (VNC)
+        run: |
+          # فعال‌سازی Screen Sharing و تنظیم رمز عبور VNC
+          # رمز عبور VNC در اینجا "SecretVNC123" تنظیم شده است
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on \
+            -clientopts -setvncpw -vncpw "SecretVNC123" \
+            -restart -agent -privs -all
+          
+          # اجازه دسترسی به همه کاربران
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -allowAccessFor -allUsers -privs -all
+
+      - name: Configure User Credentials
+        run: |
+          # استفاده از یوزر فعلی Runner برای جلوگیری از ارور تداخل
+          USER_NAME=$(whoami)
+          USER_PASS="MacAccess@2024"
+          
+          # تغییر پسورد سیستم برای یوزر فعلی
+          sudo dscl . -passwd /Users/$USER_NAME $USER_PASS
+          
+          # ذخیره اطلاعات برای نمایش در انتهای کار
+          echo "USER_NAME=$USER_NAME" >> $GITHUB_ENV
+          echo "USER_PASS=$USER_PASS" >> $GITHUB_ENV
+          echo "VNC_PASS=SecretVNC123" >> $GITHUB_ENV
+
+      - name: Install Tailscale
+        run: |
+          # نصب سریع Tailscale از طریق اسکریپت رسمی
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Start Tailscale
+        env:
+          TS_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
+        run: |
+          # اجرای سرویس Tailscale در پس‌زمینه
+          sudo tailscaled > /dev/null 2>&1 &
+          sleep 5
+          
+          # اتصال به شبکه Tailscale
+          sudo tailscale up --authkey=$TS_KEY --hostname=gh-macos-runner
+          
+          # استخراج IP داخلی Tailscale
+          TS_IP=$(tailscale ip -4)
+          echo "TS_IP=$TS_IP" >> $GITHUB_ENV
+
+      - name: Final Connection Info & Keep Alive
+        run: |
+          echo "=========================================="
+          echo "✅ macOS Remote Desktop is Ready!"
+          echo "------------------------------------------"
+          echo "📍 Tailscale IP: ${{ env.TS_IP }}"
+          echo "👤 Username: ${{ env.USER_NAME }}"
+          echo "🔑 Password: ${{ env.USER_PASS }}"
+          echo "🔒 VNC Password: ${{ env.VNC_PASS }}"
+          echo "------------------------------------------"
+          echo "How to connect:"
+          echo "1. Open VNC Viewer"
+          echo "2. Connect to: ${{ env.TS_IP }}:5900"
+          echo "3. Use VNC Password first, then login with User/Pass"
+          echo "=========================================="
+          
+          # زنده نگه داشتن سرور
+          while true; do
+            echo "Keep-alive: Runner is still active... $(date)"
+            sleep 300
+          done
+          
